@@ -1,0 +1,166 @@
+---
+title: "Predicting Championship football matches using the poisson distribution"
+output: html_notebook
+---
+
+
+The first thing we need to do is import our data in R. Our data is a csv file containing the 24 championship teams and their average goals scored and conceeded both home and away. It also contains the league average.
+
+
+```{r}
+#import the data
+champ_data = read.csv("home_away_stats.csv", header = TRUE,
+                        col.names = c("Team", "home_scored", "home_conceded",
+                                      "away_scored", "away_conceded"))
+#View data to ensure it is correct
+head(champ_data)
+```
+We would like to change the column and row names, To do this we'll use the row.names and col.names functions. But first we need to create a vector of the 24 championship teams, as well as the league average
+```{r}
+#create a vector of team names
+teams<- c("aston_villa", "birmingham", "bolton", "blackburn", "brentford", "bristol", "derby", "hull","ipswich", "leeds", "middlesbrough", "millwall", "norwich", "nottingham", "preston", "qpr", "reading", "rotherham", "sheffield_utd", "sheffield_weds", "stoke", "swansea", "west_brom", "wigan", "league average")
+```
+Now this along with our column names this can be added to our data frame. We will also remove the first column and row as they are now not needed.
+```{r}
+#import data with columna and row names
+champ_data = read.csv("home_away_stats.csv", header = TRUE,
+                        col.names = c("Team", "home_scored", "home_conceded",
+                                      "away_scored", "away_conceded"), skip = 1,
+                      row.names = teams)
+#Remove first column
+champ_data[,1]<- NULL
+#Check data
+head(champ_data)
+```
+Now our data is cleaned and in a more user friendly format we can test to see how it works. Let's try to select some data
+```{r}
+#Find Reading's full data
+champ_data["reading",]
+```
+This shows us that on average Reading score 1 goal per game at home whilst conceeding 1.33. Whilst away they score on average 1.5 goals per game while conceding 2. 
+We can also select multiple teams to compare.
+```{r}
+#Compare Reading's stats with West Brom's
+champ_data[c("reading", "west_brom"),]
+```
+We would also like to create and "attack rating" and "defence rating" for each team, both home and away.
+This will allow us to get an idea of whether each team independently is better at home/away than average in the league. 
+
+We will do this by diving a home teams goals scored by the league average home goals scored to gain a "home attack rating", and diving a teams home goals conceded by the league average home goals conceded to gain a "home defence rating".
+
+The same will be done for away stats to gain away ratings.
+```{r}
+#Adding attack and defence ratings to data frame
+champ_data$home_attack_rating<- champ_data[,"home_scored"]/champ_data["league average","home_scored"]
+champ_data$home_defence_rating<- champ_data[,"home_conceded"]/champ_data["league average", "home_conceded"]
+champ_data$away_attack_rating<- champ_data[,"away_scored"]/champ_data["league average", "away_scored"]
+champ_data$away_defence_rating<- champ_data[,"away_conceded"]/champ_data["league average", "away_conceded"]
+
+#Check to see if it worked
+head(champ_data)
+```
+Each team now has home and away ratings. 
+
+For an attack rating, a value of greater than 1 implies they score more on average than the league, whereas a rating of less than 1 implies they score less. 
+
+For a defence rating, a value of greater than 1 implies they concede more on average than the league, whereas a rating of less than 1 implies they concede less.
+
+For example:
+```{r}
+#Find the league average home goals scored
+champ_data["league average", "home_scored"]
+#Find Brentford's average home goals scored
+champ_data["brentford", "home_scored"]
+```
+Here we can see Brentford score also a goal more per game at home than the average. Let's see how that affects their home attack rating:
+```{r}
+#Find Brentford's home attack rating
+champ_data["brentford", "home_attack_rating"]
+```
+Next it's time to create our poisson model. Our function takes two inputs; the home team and the away team. It then takes data from our data frame to create a number of variables:
+
+From our dataframe it takes the following information:
+
+
+- **home_score**
+- **home_conceeded**
+- **away_scored**
+- **away_conceded**
+- **home_defence_rating**
+- **away_defence_rating**
+
+It will also have some new variables:
+
+-**num_trials**: This is the number of times the poisson distribution will run. It is set to **1 million**.
+
+-**home_goal_pred**: This is our poisson distribution used to predict the number of goals the home team will score. It takes the the mean to be _home_scored * away_defence_rating_. ie, it takes the number of goals they score on average at home and multiplies it by the awaay team's defence rating. So if a team has a good defence rating(<1) the home team's mean goals scored will be lower. 
+
+-**away_goal_pred**: This makes a similar prediction for how many goals the away team will score.
+
+Once the model has run the simulation 1million times we can compare the home goals against the away goals in each of these games to see how often each team comes out on top. 
+
+-**mean_goals**: This is how many goals per game there are on average from the 1 million simulations.
+
+-**home_win_percentage**: This calculates how many times the home team outscores the away team from the 1 million simulations. 
+
+-**away_win_percentage**: This calculates how many times the away team outscores the home team from the 1 million simulations.
+
+-**draw_percentage**: This calculates how many times the two teams score the same amount of goals from the 1 million simulations.
+
+-**over2.5_percentage**: This calulates what percentage of the 1 million simulations ended with over 2.5 goals between the two teams.
+
+-**btts_percentage**: This calculates what percentage of the 1 million simulations ended with both teams scoring atleast 1 goal.
+
+```{r}
+#Define poisson model
+poisson_model <- function(home_team, away_team)
+  
+{
+  home_scored = champ_data[home_team,"home_scored"]
+  home_conceded = champ_data[home_team, "home_conceded"]
+  away_scored= champ_data[away_team, "away_scored"]
+  away_conceded= champ_data[away_team, "away_conceded"]
+
+  home_defence_rating = champ_data[home_team, "home_defence_rating"]
+  away_defence_rating = champ_data[away_team, "away_defence_rating"]
+  num_trials = 1000000
+  home_goal_pred = rpois(num_trials, home_scored * away_defence_rating)
+  away_goal_pred = rpois(num_trials, away_scored *home_defence_rating)
+  score_matrix = cbind(home_goal_pred, away_goal_pred)
+  total_goals = home_goal_pred + away_goal_pred
+  mean_goals = mean(total_goals)
+  home_win_percentage = (sum(home_goal_pred > away_goal_pred))/num_trials
+  away_win_percentage = (sum(home_goal_pred < away_goal_pred))/num_trials
+  draw_percentage = (sum(home_goal_pred == away_goal_pred))/num_trials
+  over2.5_percentage = (sum(total_goals > 2))/num_trials
+  btts_percentage = (sum(home_goal_pred > 0 & away_goal_pred > 0))/num_trials
+
+  cat("\nMean Goals:", round(mean_goals,2))
+  cat("\nHome Win Percentage:", round(home_win_percentage*100,2), "%")
+  cat("\nAway Win Percentage:", round(away_win_percentage*100,2),"%")
+  cat("\nDraw Percentage:", round(draw_percentage*100,2),"%")
+  cat("\nOver 2.5 goals Percentage:", round(over2.5_percentage*100,2),"%")
+  cat("\nBoth teams to score Percentage:", round(btts_percentage*100,2),"%")
+} 
+```
+
+Lets test it out with some examples
+```{r}
+#Hull vs stoke
+poisson_model("hull", "stoke")
+
+```
+Here we can see our model expects Stoke to win 54.55% of the time
+```{r}
+#Aston Villa vs West Brom
+poisson_model("aston_villa", "west_brom")
+```
+This is expected to be a very high scoring game, with a prediction of 87.39% of games between the 2 teams ending with over 2.5 goals.
+
+
+
+
+
+
+
+
