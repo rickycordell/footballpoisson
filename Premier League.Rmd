@@ -1,7 +1,6 @@
 ---
 title: "Using the poisson distribution to predict Premier League Matches"
-output:
-  pdf_document:
+output: html_notebook
 ---
 
 The aim of this program is to predict premier league matches using the poisson distribution. The Kelly Criterion will then be used in order to compare the predicted results with bet365's odds in order to see if there is any value in the bets. 
